@@ -11,8 +11,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyTitle("Taskbar Compass")]
 [assembly: System.Reflection.AssemblyDescription("A configurable Windows replacement taskbar")]
 [assembly: System.Reflection.AssemblyProduct("Taskbar Compass")]
-[assembly: System.Reflection.AssemblyVersion("0.14.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.14.3.0")]
+[assembly: System.Reflection.AssemblyVersion("0.14.4.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.14.4.0")]
 namespace CompassBar {
 static class AppIdentity {
  public static readonly Icon Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -228,7 +228,7 @@ sealed class GroupEditor:Form {
  readonly TextBox name=new TextBox();readonly CheckedListBox list=new CheckedListBox();
  readonly List<PinnedApp> candidates=new List<PinnedApp>();public AppGroup Result;
  public GroupEditor(AppGroup group){
-  SuspendLayout();Text=group==null?"Create app group":"Edit app group";Icon=AppIdentity.Icon;ClientSize=new Size(480,460);StartPosition=FormStartPosition.CenterParent;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;Font=new Font("Segoe UI",10);
+  SuspendLayout();Text=group==null?"Create app group":"Edit app group";Icon=AppIdentity.Icon;ClientSize=new Size(480,460);StartPosition=FormStartPosition.CenterScreen;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;Font=new Font("Segoe UI",10);
   Controls.Add(new Label{Text="Group name",Location=new Point(20,16),Size=new Size(430,24)});name.SetBounds(20,43,440,28);name.MaxLength=40;name.Text=group==null?"":group.Name;Controls.Add(name);
   Controls.Add(new Label{Text="Choose apps (unchecked apps stay outside this group)",Location=new Point(20,83),Size=new Size(440,30)});
   list.SetBounds(20,118,440,262);list.CheckOnClick=true;Controls.Add(list);
@@ -244,6 +244,7 @@ sealed class GroupEditor:Form {
    Result=new AppGroup{Name=title};foreach(int i in list.CheckedIndices)Result.Apps.Add(candidates[i]);DialogResult=DialogResult.OK;
   };Controls.Add(save);AcceptButton=save;
   Button cancel=new Button{Text="Cancel",Location=new Point(345,400),Size=new Size(115,38),DialogResult=DialogResult.Cancel};Controls.Add(cancel);CancelButton=cancel;
+  cancel.Click+=delegate{DialogResult=DialogResult.Cancel;Close();};
   AutoScaleDimensions=new SizeF(96,96);AutoScaleMode=AutoScaleMode.Dpi;ResumeLayout(true);
  }
  static bool Same(string a,string b){return String.Equals(a,b,StringComparison.OrdinalIgnoreCase);}
@@ -715,7 +716,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
    GroupButton b;if(!groupButtons.TryGetValue(group,out b)){
     b=new GroupButton();
     AppGroup item=group;Button owner=b;b.Click+=delegate{GroupMenu(item,owner);};
-    ContextMenuStrip edit=new DarkMenu();edit.Items.Add("Edit group...",null,delegate{EditGroup(item);});b.ContextMenuStrip=edit;b.Disposed+=delegate{edit.Dispose();};
+    ContextMenuStrip edit=new DarkMenu();edit.Items.Add("Edit group...",null,delegate{QueueGroupEditor(item);});b.ContextMenuStrip=edit;b.Disposed+=delegate{edit.Dispose();};
     groupButtons.Add(group,b);windowList.Controls.Add(b);
    }
    List<IntPtr> grouped=handles.Where(h=>group.Apps.Any(a=>!String.IsNullOrEmpty(a.Target)&&String.Equals(paths[h],a.Target,StringComparison.OrdinalIgnoreCase))).ToList();
@@ -775,6 +776,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
   try{ProcessStartInfo start=file.StartsWith("shell:AppsFolder\\",StringComparison.OrdinalIgnoreCase)?new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe"),"\""+file.Replace("\"","")+"\""):new ProcessStartInfo(file);start.UseShellExecute=true;Process.Start(start);}catch(Exception ex){MessageBox.Show(this,"Could not open "+file+"\n"+ex.Message,"Taskbar Compass");}
  }
  void EditGroup(AppGroup group){
+  if(activeMenu!=null)activeMenu.Close();
   using(GroupEditor editor=new GroupEditor(group))if(editor.ShowDialog(this)==DialogResult.OK){
    if(group!=null){editor.Result.LastSelected=group.LastSelected;foreach(PinnedApp app in group.Apps)Preferences.Add(app.Path);int index=Preferences.Groups.IndexOf(group);Preferences.Groups[index]=editor.Result;}
    else Preferences.Groups.Add(editor.Result);
@@ -793,16 +795,23 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
    else{foreach(IntPtr h in matches){IntPtr window=h;item.DropDownItems.Add(Native.Title(h),null,delegate{RememberGroupApp(group,target);Native.Activate(window);lastActive=window;});}item.DropDownItems.Add("Open new instance",null,delegate{RememberGroupApp(group,target);Launch(target.Path);});}
   }
   if(group.Apps.Count==0)menu.Items.Add(new ToolStripMenuItem("No apps yet - choose Edit group"){Enabled=false});
-  menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Edit group...",null,delegate{EditGroup(group);});
+  menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Edit group...",null,delegate{QueueGroupEditor(group);});
   menu.Items.Add("Ungroup apps",null,delegate{foreach(PinnedApp app in group.Apps)Preferences.Add(app.Path);Preferences.Groups.Remove(group);Preferences.SaveGroups();Preferences.SavePins();BeginInvoke((Action)UpdateWindows);});
   ShowMenu(menu,owner);
  }
  void ShowMenu(ContextMenuStrip m,Control owner){
   DarkMenu.Style(m);if(activeMenu!=null)activeMenu.Dispose();activeMenu=m;
-  if(edge==Edge.Bottom)m.Show(owner,new Point(0,-m.GetPreferredSize(Size.Empty).Height));
-  else if(edge==Edge.Right)m.Show(owner,new Point(-m.GetPreferredSize(Size.Empty).Width,0));
-  else m.Show(owner,new Point(0,owner.Height));
+  Size size=m.GetPreferredSize(Size.Empty);Rectangle anchor=owner.RectangleToScreen(owner.ClientRectangle);
+  Point location=MenuLocation(Bounds,anchor,size,Screen.FromControl(this).WorkingArea,edge);
+  m.Show(location);
  }
+ public static Point MenuLocation(Rectangle bar,Rectangle anchor,Size size,Rectangle work,Edge edge){
+  const int gap=4;
+  int x=edge==Edge.Left?bar.Right+gap:edge==Edge.Right?bar.Left-size.Width-gap:anchor.Left;
+  int y=edge==Edge.Top?bar.Bottom+gap:edge==Edge.Bottom?bar.Top-size.Height-gap:anchor.Top;
+  return new Point(Math.Max(work.Left,Math.Min(x,work.Right-size.Width)),Math.Max(work.Top,Math.Min(y,work.Bottom-size.Height)));
+ }
+ void QueueGroupEditor(AppGroup group){if(activeMenu!=null)activeMenu.Close();BeginInvoke((Action)delegate{if(!closing)EditGroup(group);});}
  void LaunchMenu(){
   ContextMenuStrip m=new DarkMenu();
   m.Items.Add(new ToolStripMenuItem("TASKBAR COMPASS"){Enabled=false});
@@ -813,7 +822,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
   m.Items.Add(new ToolStripSeparator());QuickSites.AddTo(m.Items,Launch);
   m.Items.Add("Edit quick websites...",null,delegate{using(QuickSitesEditor editor=new QuickSitesEditor())editor.ShowDialog(this);});
   m.Items.Add(new ToolStripSeparator());
-  m.Items.Add("Create app group...",null,delegate{EditGroup(null);});
+  m.Items.Add("Create app group...",null,delegate{QueueGroupEditor(null);});
   m.Items.Add("Pin an app...",null,delegate{using(OpenFileDialog d=new OpenFileDialog{Title="Pin a program or shortcut",Filter="Programs and shortcuts|*.exe;*.lnk",DereferenceLinks=false})if(d.ShowDialog(this)==DialogResult.OK){Preferences.Add(d.FileName);Preferences.SavePins();UpdateWindows();}});
   m.Items.Add("Installed apps",null,delegate{Launch("shell:AppsFolder");});
   m.Items.Add("File Explorer",null,delegate{Launch("explorer.exe");});

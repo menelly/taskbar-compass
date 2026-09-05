@@ -2,7 +2,7 @@
 
 A customisable Windows taskbar with app groups, quick websites, and collectible pets.
 
-**Windows-only beta · version 0.14.3 · x64**
+**Windows-only beta · version 0.14.4 · x64**
 
 ## Features
 
@@ -74,4 +74,11 @@ Created by **Luka** — concept, design direction, feature ideas, and hands-on t
 Built with **Nova (OpenAI Codex)** — AI-assisted implementation, debugging, and documentation.
 
 Published with permission on Ren's GitHub account, **menelly**.
+
+
+## 0.14.4 hotfix
+
+Menus now open beside the taskbar instead of covering the app-icon column. Group editing is deferred until the menu closes, and the editor is centred on screen. Isolated checks cover menu placement on all four edges, Cancel, Escape, window close, and restoring taskbar interaction. Confirmation on affected PCs is still needed.
+
+Run the isolated menu and dialog regression checks on Windows with: `.\Tests\RunMenuTests.ps1`. The fixture disables real taskbar initialization and uses temporary settings; it opens and dismisses test dialogs.
 

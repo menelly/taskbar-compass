@@ -1,2 +1,77 @@
-# taskbar-compass
-A customisable Windows taskbar with app groups, quick websites, and collectible pets. Windows-only beta.
+# Taskbar Compass
+
+A customisable Windows taskbar with app groups, quick websites, and collectible pets.
+
+**Windows-only beta · version 0.14.3 · x64**
+
+## Features
+
+- Place the taskbar on any screen edge, with left/right or top/bottom app alignment.
+- Change background transparency and colour while keeping app logos opaque.
+- Pin apps, organise groups, and search installed apps and open windows.
+- Add your own quick website buttons.
+- Open Windows quick settings from the Wi-Fi/sound button or battery.
+- Show a 12-hour clock and a live coin counter.
+- Keep Bert the mouse, or unlock Sulverster the cat (100 coins) and Bark the dog (300 coins).
+- Earn 1 coin per active minute and half a coin per idle minute after five minutes without input. Earnings require the replacement taskbar to be running; sleep and offline time do not earn coins.
+- Move overlapping normal windows clear of the taskbar when a drag or resize finishes.
+
+## Build and run
+
+Requires Windows x64 with .NET Framework 4.x and its built-in C# compiler. Windows 11 is the intended platform; behaviour on other versions has not been fully tested.
+
+Open PowerShell in the project folder and run:
+
+```powershell
+.\Source\BuildReplacement.ps1 -Destination .\dist
+Copy-Item .\README.md .\dist\README.md
+.\dist\TaskbarCompass.exe
+```
+
+Choose an edge and click **Continue**. Opening setup alone does not replace the Windows taskbar.
+
+Optional installation for the current Windows account:
+
+```powershell
+.\InstallTaskbarCompass.ps1 -SourceDirectory .\dist
+```
+
+Restore and exit any existing Taskbar Compass session before installing an update. The installer creates desktop and Start-menu shortcuts. It does not enable automatic startup.
+
+## Restore Windows' taskbar
+
+Click **Restore** on Taskbar Compass or press **Ctrl+Alt+Shift+R**. You can also run **RestoreWindowsTaskbar.exe**, included in the build, for emergency restoration. A separate watchdog attempts restoration if the main process exits unexpectedly.
+
+## Pets and saved data
+
+Open **Windows icon → Pet Shop** or click the coin counter. Unlocked pets can be equipped repeatedly without paying again. Each has its own feeding reaction.
+
+Preferences, coins, pet unlocks, and snack counts are stored locally in `%LOCALAPPDATA%\TaskbarCompass`. Coins save every five seconds, at shutdown/logoff notifications, and before normal taskbar restoration. Writes are flushed to disk; a previous valid pet save is retained as a backup. Abrupt power loss can still lose recent unsaved progress.
+
+## Beta limitations
+
+- Replaces the taskbar on the primary display; separate replacement bars on other monitors are not implemented.
+- No native notification tray, notification badges, or complete Start-menu replacement.
+- App matching can miss packaged apps or shortcuts that start an updater rather than the app itself.
+- Some elevated or custom windows may reject activation or repositioning.
+- Wi-Fi/sound drawings are shortcuts, not live connection or volume indicators; battery data is live.
+- Recovery and window behaviour depend on Windows Explorer and should be tested carefully before everyday use.
+
+## Development and validation
+
+`Source/ReplacementBar.cs` contains the taskbar UI and Windows integration; `Source/PetShop.cs` contains pet progression and shop UI. The build script uses the Windows .NET Framework compiler and no downloaded dependencies.
+
+Targeted development checks covered coin persistence and backup recovery, pet unlock prices, feed reactions, menu hit areas, and geometry on all four edges. These checks are not a guarantee of compatibility with every Windows setup. Private development logs and personal settings are intentionally excluded from this repository.
+
+Please include your Windows version, taskbar edge, and steps to reproduce when reporting bugs. Do not attach personal settings or account information.
+
+No licence has been selected yet; publication does not grant an additional open-source licence.
+
+## Credits
+
+Created by **Luka** — concept, design direction, feature ideas, and hands-on testing.
+
+Built with **Nova (OpenAI Codex)** — AI-assisted implementation, debugging, and documentation.
+
+Published with permission on Ren's GitHub account, **menelly**.
+

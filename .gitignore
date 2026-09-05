@@ -1,0 +1,14 @@
+dist/
+work/
+*.exe
+*.pdb
+*.tmp
+*.bak
+pets.txt
+bert-snacks.txt
+pins.txt
+groups.txt
+quick-sites.txt
+recovery.txt
+*-validation.txt
+replacement-status.txt

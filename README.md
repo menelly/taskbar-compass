@@ -2,7 +2,18 @@
 
 A customisable Windows taskbar with app groups, quick websites, and collectible pets.
 
-**Windows-only beta · version 0.14.4 · x64**
+**Gui Update 1.2 · Windows-only beta · x64**
+
+## Gui Update 1.2
+
+- Fixed the solid taskbar background covering app icons, including recovery after window-order changes.
+- Pet Shop and the group editor now open independently, keeping the taskbar usable. Their close controls work without blocking the bar.
+- The setup window stays open after applying the taskbar or changing its edge.
+- Refreshed the group editor with a dark theme, app icons, clearer buttons, and a selected-app count.
+- Groups can use a Folder, Star, Heart, or Grid icon with preset or custom colours and a live preview. The last-opened app icon remains an option.
+- Custom icons persist across restarts and app switches. Existing group membership remains compatible with the previous save format.
+
+The reported blanking and dialog problems were confirmed resolved by hands-on testing on the affected PC. Automated checks also cover window ordering, independent dialog lifecycle, group saving, and icon persistence. Broader Windows compatibility remains beta.
 
 ## Features
 

@@ -9,7 +9,7 @@ $testSource=Join-Path $stage 'ClickSource.cs'
 [IO.File]::WriteAllText($testSource,$source)
 $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $exe=Join-Path $stage 'LauncherClickTests.exe'
-& $compiler /nologo /target:winexe /platform:x64 /main:CompassBar.LauncherClickTests "/out:$exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $testSource (Join-Path $PSScriptRoot 'LauncherClickTests.cs') (Join-Path $PSScriptRoot '..\Source\PetShop.cs')
+& $compiler /nologo /target:winexe /platform:x64 /main:CompassBar.LauncherClickTests "/out:$exe" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll $testSource (Join-Path $PSScriptRoot 'LauncherClickTests.cs') (Join-Path $PSScriptRoot 'GroupIconTests.cs') (Join-Path $PSScriptRoot '..\Source\PetShop.cs')
 if($LASTEXITCODE -ne 0){throw 'Click test compilation failed'}
 $test=Start-Process -FilePath $exe -WindowStyle Hidden -Wait -PassThru
 Get-Content (Join-Path $stage 'launcher-click-validation.txt')

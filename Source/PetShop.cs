@@ -63,7 +63,7 @@ sealed class PetShop:Form {
    Button button=new Button{Location=new Point(302,19),Size=new Size(146,38),FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(39,62,82),ForeColor=ForeColor};button.FlatAppearance.BorderSize=0;buttons[i]=button;card.Controls.Add(button);
    button.Click+=delegate{try{wallet.Select(index);changed();UpdateButtons();}catch(Exception ex){MessageBox.Show(this,ex.Message,"Pet Shop");}};
   }
-  Button close=new Button{Text="Close",Location=new Point(366,425),Size=new Size(120,32),DialogResult=DialogResult.Cancel};Controls.Add(close);CancelButton=close;
+  Button close=new Button{Text="Close",Location=new Point(366,425),Size=new Size(120,32),DialogResult=DialogResult.Cancel};close.Click+=delegate{Close();};Controls.Add(close);CancelButton=close;
   AutoScaleDimensions=new SizeF(96,96);AutoScaleMode=AutoScaleMode.Dpi;refresh.Tick+=delegate{UpdateButtons();};Shown+=delegate{refresh.Start();};UpdateButtons();
  }
  void UpdateButtons(){balance.Text="Your coins: "+wallet.Coins.ToString("0.0",CultureInfo.CurrentCulture);for(int i=0;i<3;i++){buttons[i].Text=wallet.Equipped==i?"Equipped":wallet.Owned[i]?"Equip":"Unlock · "+Pet.All[i].Price;buttons[i].Enabled=wallet.Equipped!=i&&(wallet.Owned[i]||wallet.Coins>=Pet.All[i].Price);}}

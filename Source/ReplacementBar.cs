@@ -11,8 +11,9 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyTitle("Taskbar Compass")]
 [assembly: System.Reflection.AssemblyDescription("A configurable Windows replacement taskbar")]
 [assembly: System.Reflection.AssemblyProduct("Taskbar Compass")]
-[assembly: System.Reflection.AssemblyVersion("0.14.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.14.4.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("Gui Update 1.2")]
 namespace CompassBar {
 static class AppIdentity {
  public static readonly Icon Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -221,34 +222,65 @@ sealed class PinnedApp {
 sealed class AppGroup {
  public string Name;
  public string LastSelected="";
+ public int IconStyle;public Color IconColor=Color.FromArgb(177,133,245);
  public PinnedApp IconApp{get{return Apps.FirstOrDefault(a=>String.Equals(a.Path,LastSelected,StringComparison.OrdinalIgnoreCase))??Apps.FirstOrDefault();}}
  public readonly List<PinnedApp> Apps=new List<PinnedApp>();
 }
+static class GroupIcon {
+ public static Bitmap Create(int style,Color color){
+  Bitmap bitmap=new Bitmap(64,64);
+  using(Graphics g=Graphics.FromImage(bitmap))using(SolidBrush fill=new SolidBrush(color)){
+   g.SmoothingMode=SmoothingMode.AntiAlias;
+   if(style==2){PointF[] points=new PointF[10];for(int i=0;i<10;i++){double angle=-Math.PI/2+i*Math.PI/5;float radius=i%2==0?27:12;points[i]=new PointF(32+(float)Math.Cos(angle)*radius,32+(float)Math.Sin(angle)*radius);}g.FillPolygon(fill,points);}
+   else if(style==3){using(GraphicsPath heart=new GraphicsPath()){heart.AddBezier(32,55,24,48,4,35,5,21);heart.AddBezier(5,21,6,4,25,4,32,18);heart.AddBezier(32,18,39,4,58,4,59,21);heart.AddBezier(59,21,60,35,40,48,32,55);g.FillPath(fill,heart);}}
+   else if(style==4){foreach(int x in new[]{7,35})foreach(int y in new[]{7,35})g.FillRectangle(fill,x,y,22,22);}
+   else{using(GraphicsPath folder=new GraphicsPath()){folder.AddPolygon(new[]{new Point(5,13),new Point(26,13),new Point(32,20),new Point(59,20),new Point(59,53),new Point(5,53)});g.FillPath(fill,folder);}using(SolidBrush front=new SolidBrush(Color.FromArgb(Math.Min(255,color.R+22),Math.Min(255,color.G+22),Math.Min(255,color.B+22))))g.FillRectangle(front,5,25,54,28);}
+  }return bitmap;
+ }
+}
 sealed class GroupEditor:Form {
- readonly TextBox name=new TextBox();readonly CheckedListBox list=new CheckedListBox();
+ readonly TextBox name=new TextBox();readonly ListView list=new ListView();
+ readonly ImageList appIcons=new ImageList{ImageSize=new Size(32,32),ColorDepth=ColorDepth.Depth32Bit};
+ readonly List<Bitmap> iconImages=new List<Bitmap>();readonly Label selection=new Label();
+ int selectedIconStyle;readonly List<Button> shapeButtons=new List<Button>();readonly PictureBox iconPreview=new PictureBox();Color iconColor;
  readonly List<PinnedApp> candidates=new List<PinnedApp>();public AppGroup Result;
  public GroupEditor(AppGroup group){
-  SuspendLayout();Text=group==null?"Create app group":"Edit app group";Icon=AppIdentity.Icon;ClientSize=new Size(480,460);StartPosition=FormStartPosition.CenterScreen;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;Font=new Font("Segoe UI",10);
-  Controls.Add(new Label{Text="Group name",Location=new Point(20,16),Size=new Size(430,24)});name.SetBounds(20,43,440,28);name.MaxLength=40;name.Text=group==null?"":group.Name;Controls.Add(name);
-  Controls.Add(new Label{Text="Choose apps (unchecked apps stay outside this group)",Location=new Point(20,83),Size=new Size(440,30)});
-  list.SetBounds(20,118,440,262);list.CheckOnClick=true;Controls.Add(list);
+  SuspendLayout();Text=group==null?"Create app group":"Edit app group";Icon=AppIdentity.Icon;ClientSize=new Size(560,600);StartPosition=FormStartPosition.CenterScreen;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;Font=new Font("Segoe UI",10);BackColor=Color.FromArgb(22,26,33);ForeColor=Color.FromArgb(238,244,251);
+  Controls.Add(new Label{Text=group==null?"Your apps, together":"Make this group yours",Location=new Point(24,20),Size=new Size(512,40),Font=new Font("Segoe UI Semibold",20)});
+  Controls.Add(new Label{Text="Keep the apps you reach for in one little home.",Location=new Point(26,65),Size=new Size(510,26),ForeColor=Color.FromArgb(152,165,183)});
+  Controls.Add(new Label{Text="GROUP NAME",Location=new Point(26,109),Size=new Size(508,22),ForeColor=Color.FromArgb(112,196,248),Font=new Font("Segoe UI Semibold",9)});name.SetBounds(26,136,508,30);name.MaxLength=40;name.Text=group==null?"":group.Name;name.BackColor=Color.FromArgb(34,41,52);name.ForeColor=ForeColor;name.BorderStyle=BorderStyle.FixedSingle;name.AccessibleName="Group name";Controls.Add(name);
+  iconColor=group==null?Color.FromArgb(177,133,245):group.IconColor;selectedIconStyle=group==null?0:Math.Max(0,Math.Min(4,group.IconStyle));
+  Controls.Add(new Label{Text="GROUP ICON",Location=new Point(26,183),Size=new Size(508,22),ForeColor=Color.FromArgb(112,196,248),Font=new Font("Segoe UI Semibold",9)});
+  iconPreview.SetBounds(26,213,64,64);iconPreview.SizeMode=PictureBoxSizeMode.Zoom;iconPreview.AccessibleName="Group icon preview";Controls.Add(iconPreview);
+  Action refreshIcon=delegate{Image previous=iconPreview.Image;iconPreview.Image=selectedIconStyle==0?(group!=null&&group.IconApp!=null?group.IconApp.GetIcon():SystemIcons.Application.ToBitmap()):GroupIcon.Create(selectedIconStyle,iconColor);if(previous!=null)previous.Dispose();for(int n=0;n<shapeButtons.Count;n++){shapeButtons[n].BackColor=n==selectedIconStyle?Color.FromArgb(64,97,126):Color.FromArgb(34,41,52);shapeButtons[n].ForeColor=ForeColor;}};
+  string[] shapes={"App icon","Folder","Star","Heart","Grid"};for(int i=0;i<shapes.Length;i++){int style=i;Button choice=new Button{Text=shapes[i],AccessibleName=shapes[i]+" group icon shape",Location=new Point(108+i*86,210),Size=new Size(82,32),FlatStyle=FlatStyle.Flat,Cursor=Cursors.Hand};choice.FlatAppearance.BorderSize=0;choice.Click+=delegate{selectedIconStyle=style;refreshIcon();};shapeButtons.Add(choice);Controls.Add(choice);}refreshIcon();
+  Color[] palette={Color.FromArgb(177,133,245),Color.FromArgb(104,194,250),Color.FromArgb(101,216,173),Color.FromArgb(249,137,186),Color.FromArgb(250,181,99)};string[] colorNames={"Purple","Blue","Mint","Pink","Peach"};
+  for(int i=0;i<palette.Length;i++){Color color=palette[i];Button swatch=new Button{BackColor=color,Location=new Point(108+i*45,252),Size=new Size(35,30),FlatStyle=FlatStyle.Flat,AccessibleName=colorNames[i]+" group icon",Cursor=Cursors.Hand};swatch.FlatAppearance.BorderSize=0;swatch.Click+=delegate{iconColor=color;if(selectedIconStyle==0)selectedIconStyle=1;refreshIcon();};Controls.Add(swatch);}
+  Button custom=new Button{Text="Custom colour...",Location=new Point(346,250),Size=new Size(188,34),FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(39,50,65),ForeColor=ForeColor};custom.FlatAppearance.BorderSize=0;custom.Click+=delegate{using(ColorDialog picker=new ColorDialog{Color=iconColor,FullOpen=true,AnyColor=true})if(picker.ShowDialog(this)==DialogResult.OK){iconColor=picker.Color;if(selectedIconStyle==0)selectedIconStyle=1;refreshIcon();}};Controls.Add(custom);
+  selection.SetBounds(26,306,508,24);selection.ForeColor=Color.FromArgb(152,165,183);Controls.Add(selection);
+  list.SetBounds(26,338,508,178);list.View=View.Details;list.HeaderStyle=ColumnHeaderStyle.None;list.CheckBoxes=true;list.FullRowSelect=true;list.HideSelection=false;list.MultiSelect=false;list.BorderStyle=BorderStyle.None;list.BackColor=Color.FromArgb(30,36,46);list.ForeColor=ForeColor;list.SmallImageList=appIcons;list.Columns.Add("Apps",475);list.AccessibleName="Apps to include in this group";list.ShowItemToolTips=true;Controls.Add(list);
+  list.ItemChecked+=delegate{selection.Text="CHOOSE APPS   ·   "+list.CheckedItems.Count+" selected";};
   IEnumerable<PinnedApp> all=Preferences.Pins.Concat(Preferences.Groups.SelectMany(g=>g.Apps));
   foreach(IntPtr h in Native.Windows(Process.GetCurrentProcess().Id)){string p=PinnedApp.WindowPath(h);if(!String.IsNullOrEmpty(p))all=all.Concat(new[]{new PinnedApp(p)});}
   foreach(PinnedApp app in all)AddCandidate(app,group!=null&&group.Apps.Any(a=>Same(a.Path,app.Path)));
-  Button browse=new Button{Text="Browse...",Location=new Point(20,400),Size=new Size(120,38)};
+  selection.Text="CHOOSE APPS   ·   "+list.CheckedItems.Count+" selected";
+  Button browse=new Button{Text="+ Add apps...",Location=new Point(26,542),Size=new Size(142,38)};
   browse.Click+=delegate{using(OpenFileDialog d=new OpenFileDialog{Title="Add apps to group",Filter="Programs and shortcuts|*.exe;*.lnk",DereferenceLinks=false,Multiselect=true})if(d.ShowDialog(this)==DialogResult.OK)foreach(string path in d.FileNames)AddCandidate(new PinnedApp(path),true);};Controls.Add(browse);
-  Button save=new Button{Text="Save group",Location=new Point(210,400),Size=new Size(125,38)};
+  Button save=new Button{Text="Save group",Location=new Point(400,542),Size=new Size(134,38)};
   save.Click+=delegate{
    string title=name.Text.Trim();if(title.Length==0){MessageBox.Show(this,"Enter a group name.");name.Focus();return;}
    if(Preferences.Groups.Any(g=>g!=group&&Same(g.Name,title))){MessageBox.Show(this,"A group with that name already exists.");return;}
-   Result=new AppGroup{Name=title};foreach(int i in list.CheckedIndices)Result.Apps.Add(candidates[i]);DialogResult=DialogResult.OK;
+   Result=new AppGroup{Name=title,IconStyle=selectedIconStyle,IconColor=iconColor};foreach(int i in list.CheckedIndices)Result.Apps.Add(candidates[i]);DialogResult=DialogResult.OK;Close();
   };Controls.Add(save);AcceptButton=save;
-  Button cancel=new Button{Text="Cancel",Location=new Point(345,400),Size=new Size(115,38),DialogResult=DialogResult.Cancel};Controls.Add(cancel);CancelButton=cancel;
+  Button cancel=new Button{Text="Cancel",Location=new Point(282,542),Size=new Size(106,38),DialogResult=DialogResult.Cancel};Controls.Add(cancel);CancelButton=cancel;
+  foreach(Button button in new[]{browse,cancel,save}){button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderSize=0;button.BackColor=Color.FromArgb(39,50,65);button.ForeColor=ForeColor;button.Cursor=Cursors.Hand;}
+  save.BackColor=Color.FromArgb(112,196,248);save.ForeColor=Color.FromArgb(15,31,44);
   cancel.Click+=delegate{DialogResult=DialogResult.Cancel;Close();};
   AutoScaleDimensions=new SizeF(96,96);AutoScaleMode=AutoScaleMode.Dpi;ResumeLayout(true);
  }
  static bool Same(string a,string b){return String.Equals(a,b,StringComparison.OrdinalIgnoreCase);}
- void AddCandidate(PinnedApp app,bool selected){int index=candidates.FindIndex(a=>Same(a.Path,app.Path));if(index>=0){if(selected)list.SetItemChecked(index,true);return;}candidates.Add(app);list.Items.Add(app.Name,selected);}
+ void AddCandidate(PinnedApp app,bool selected){int index=candidates.FindIndex(a=>Same(a.Path,app.Path));if(index>=0){if(selected)list.Items[index].Checked=true;return;}candidates.Add(app);Bitmap icon=app.GetIcon();iconImages.Add(icon);appIcons.Images.Add(icon);list.Items.Add(new ListViewItem(app.Name,appIcons.Images.Count-1){Checked=selected,ToolTipText=app.Path});}
+ protected override void Dispose(bool disposing){if(disposing&&iconPreview.Image!=null){iconPreview.Image.Dispose();iconPreview.Image=null;}base.Dispose(disposing);if(disposing){appIcons.Dispose();foreach(Bitmap icon in iconImages)icon.Dispose();}}
 }
 static class Preferences {
  public static string Folder=RecoveryRecord.Folder;
@@ -260,11 +292,12 @@ static class Preferences {
  public static readonly List<AppGroup> Groups=new List<AppGroup>();
  static string Encode(string s){return Convert.ToBase64String(Encoding.UTF8.GetBytes(s));}
  static string Decode(string s){return Encoding.UTF8.GetString(Convert.FromBase64String(s));}
- public static void SaveGroups(){Directory.CreateDirectory(Folder);File.WriteAllLines(Path.Combine(Folder,"groups.txt"),Groups.Select(g=>String.Join("|",new[]{Encode(g.Name),"@"+Encode(g.LastSelected??"")}.Concat(g.Apps.Select(a=>Encode(a.Path))))).ToArray());}
+ public static void SaveGroups(){Directory.CreateDirectory(Folder);File.WriteAllLines(Path.Combine(Folder,"groups.txt"),Groups.Select(g=>String.Join("|",new[]{Encode(g.Name),"@"+Encode(g.LastSelected??"")}.Concat(g.Apps.Select(a=>Encode(a.Path))))).ToArray());File.WriteAllLines(Path.Combine(Folder,"group-icons.txt"),Groups.Select(g=>Encode(g.Name)+"|"+g.IconStyle+"|"+(g.IconColor.ToArgb()&0xFFFFFF).ToString("X6")).ToArray());}
  public static bool Grouped(PinnedApp app){return Groups.Any(g=>g.Apps.Any(a=>String.Equals(a.Path,app.Path,StringComparison.OrdinalIgnoreCase)||(!String.IsNullOrEmpty(a.Target)&&String.Equals(a.Target,app.Target,StringComparison.OrdinalIgnoreCase))));}
  public static void Load(){
   Directory.CreateDirectory(Folder);Pins.Clear();OpacityPercent=100;int n;
   Groups.Clear();string groups=Path.Combine(Folder,"groups.txt");if(File.Exists(groups))foreach(string line in File.ReadAllLines(groups))try{string[] fields=line.Split('|');AppGroup g=new AppGroup{Name=Decode(fields[0])};foreach(string p in fields.Skip(1)){if(p.StartsWith("@"))g.LastSelected=Decode(p.Substring(1));else g.Apps.Add(new PinnedApp(Decode(p)));}Groups.Add(g);}catch{}
+  string icons=Path.Combine(Folder,"group-icons.txt");if(File.Exists(icons))foreach(string line in File.ReadAllLines(icons))try{string[] fields=line.Split('|');int style,rgb;if(fields.Length!=3||!Int32.TryParse(fields[1],out style)||style<0||style>4||fields[2].Length!=6||!Int32.TryParse(fields[2],System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out rgb))continue;AppGroup group=Groups.FirstOrDefault(g=>g.Name==Decode(fields[0]));if(group!=null){group.IconStyle=style;group.IconColor=Color.FromArgb(255,(rgb>>16)&255,(rgb>>8)&255,rgb&255);}}catch(FormatException){}
   string alignment=Path.Combine(Folder,"alignment.txt");AppsAtEnd=File.Exists(alignment)&&File.ReadAllText(alignment).Trim()=="end";
   string opacity=Path.Combine(Folder,"opacity.txt");if(File.Exists(opacity)&&Int32.TryParse(File.ReadAllText(opacity),out n))OpacityPercent=Math.Max(35,Math.Min(100,n));
   BackgroundTint=DefaultTint;string tint=Path.Combine(Folder,"tint.txt");
@@ -454,7 +487,7 @@ class WindowButton:Button {
 sealed class GroupButton:WindowButton {
  string iconPath;
  public GroupButton():base(IntPtr.Zero){}
- public void SetApp(PinnedApp app){string next=app==null?"":app.Path;if(iconPath==next)return;iconPath=next;if(AppIcon!=null)AppIcon.Dispose();AppIcon=app==null?SystemIcons.Application.ToBitmap():app.GetIcon();Invalidate();}
+ public void SetGroup(AppGroup group){PinnedApp app=group.IconApp;string next=group.IconStyle==0?(app==null?"default":app.Path):"custom:"+group.IconStyle+":"+group.IconColor.ToArgb();if(iconPath==next)return;iconPath=next;if(AppIcon!=null)AppIcon.Dispose();AppIcon=group.IconStyle!=0?GroupIcon.Create(group.IconStyle,group.IconColor):app==null?SystemIcons.Application.ToBitmap():app.GetIcon();Invalidate();}
  protected override void OnPaint(PaintEventArgs e){
   base.OnPaint(e);float s=e.Graphics.DpiX/96f;float x=Width/2f+5*s,y=Height/2f+3*s;
   using(SolidBrush fill=new SolidBrush(Color.FromArgb(22,26,33)))e.Graphics.FillEllipse(fill,x-2*s,y-2*s,15*s,15*s);
@@ -570,8 +603,19 @@ sealed class Bar:Form {
  void SyncBackground(){
   if(closing||!registered||syncingBackground)return;syncingBackground=true;
   try{background.BackColor=Preferences.BackgroundTint;background.Opacity=Preferences.OpacityPercent/100.0;background.Bounds=Bounds;background.TopMost=TopMost;
-   if(!background.Visible)background.Show();Native.SetWindowPos(background.Handle,Handle,Left,Top,Width,Height,0x10);
+   if(!background.Visible){background.Show();BeginInvoke((Action)EnsureBackgroundOrder);}
+   EnsureBackgroundOrder();
   }finally{syncingBackground=false;}
+ }
+ void EnsureBackgroundOrder(){
+  if(closing||!registered||!IsHandleCreated||background.IsDisposed||!background.IsHandleCreated||!background.Visible)return;
+  // A first show or later window-position change can raise the solid tint over the icons.
+  bool wasSyncing=syncingBackground;syncingBackground=true;
+  try{if(Native.GetWindow(Handle,2)!=background.Handle){
+   // SWP_NOOWNERZORDER also preserves WinForms' hidden owner for ShowInTaskbar=false.
+   Native.SetWindowPos(background.Handle,Handle,0,0,0,0,0x213);
+  }}
+  finally{syncingBackground=wasSyncing;}
  }
  readonly Session session=new Session();
  readonly FlowLayoutPanel windowList=new FlowLayoutPanel();
@@ -588,10 +632,11 @@ sealed class Bar:Form {
  readonly uint callback=Native.RegisterWindowMessage("TaskbarCompass.Appbar.Callback"),shellRestart=Native.RegisterWindowMessage("TaskbarCreated");
  int refreshCount; Edge edge=Edge.Left;bool registered,placing,closing,ready;float dpiScale=1;IntPtr lastActive;
  readonly PetWallet pets=new PetWallet();readonly Stopwatch petTime=new Stopwatch();double petSaveSeconds;string petSaveError;DateTime bertFedUntil=DateTime.MinValue;
- BertReaction bertReaction;
+ BertReaction bertReaction;PetShop petShop;GroupEditor groupEditor;AppGroup editingGroup;
  public string Failure;
  public bool Ready{get{return ready;}}public Edge CurrentEdge{get{return edge;}}
  Button ButtonAt(Point screen){
+  if(closing||!Enabled)return null;
   foreach(Button button in new[]{apps,restore,quickSettings,coinCounter})if(button.Visible&&button.Enabled&&button.RectangleToScreen(button.ClientRectangle).Contains(screen))return button;
   if(battery.Visible&&battery.RectangleToScreen(battery.ClientRectangle).Contains(screen))return quickSettings;
   if(!windowList.RectangleToScreen(windowList.ClientRectangle).Contains(screen))return null;
@@ -629,7 +674,7 @@ sealed class Bar:Form {
   Controls.Add(windowList);Controls.Add(commandPanel);Controls.Add(endPanel);
   tips.SetToolTip(restore,"Restore Windows taskbar and its previous auto-hide setting, then exit.");
   tips.SetToolTip(apps,"Search, launch apps, and adjust taskbar settings.");
-  timer.Interval=150;timer.Tick+=delegate{if(!session.Tick()){Close();return;}EarnPetCoins();if(++refreshCount%5==0){UpdateWindows();battery.UpdateReading();}UpdateClock();};
+  timer.Interval=150;timer.Tick+=delegate{if(!session.Tick()){Close();return;}EnsureBackgroundOrder();EarnPetCoins();if(++refreshCount%5==0){UpdateWindows();battery.UpdateReading();}UpdateClock();};
   Shown+=delegate{Initialize();};FormClosing+=delegate{Cleanup();};
  }
  void UpdateClock(){
@@ -640,7 +685,15 @@ sealed class Bar:Form {
   clock.Text=(now<bertFedUntil?pets.Current.Emoji+" "+pets.Current.Food:"\u23F0 "+pets.Current.Emoji)+(edge==Edge.Left||edge==Edge.Right?"\n":" ")+now.ToString("h:mmtt",System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
  }
  public static string CoinText(decimal value){return value>=1000000m?(Decimal.Floor(value/100000m)/10m).ToString("0.#")+"m":value>=1000m?(Decimal.Floor(value/100m)/10m).ToString("0.#")+"k":(Decimal.Floor(value*10m)/10m).ToString("0.0");}
- void OpenPetShop(){using(PetShop shop=new PetShop(pets,delegate{bertFedUntil=DateTime.MinValue;if(bertReaction!=null)bertReaction.Dispose();tips.SetToolTip(clock,pets.Current.Name+" - your taskbar pet");UpdateClock();}))shop.ShowDialog(this);UpdateClock();}
+ void OpenPetShop(){
+  if(closing)return;
+  if(petShop!=null&&!petShop.IsDisposed){petShop.Activate();return;}
+  PetShop shop=new PetShop(pets,delegate{bertFedUntil=DateTime.MinValue;if(bertReaction!=null)bertReaction.Dispose();tips.SetToolTip(clock,pets.Current.Name+" - your taskbar pet");UpdateClock();});
+  petShop=shop;shop.StartPosition=FormStartPosition.CenterScreen;shop.TopMost=true;
+  shop.FormClosed+=delegate{if(petShop==shop)petShop=null;if(!closing)UpdateClock();};
+  // The appbar deliberately rejects activation; give the shop an independent input window.
+  shop.Show();shop.Activate();
+ }
  void EarnPetCoins(){double seconds=petTime.Elapsed.TotalSeconds;petTime.Restart();pets.Earn(seconds,IdleTime.IsIdle());petSaveSeconds+=Math.Min(seconds,5);if(petSaveSeconds>=5){SavePetProgress();}}
  void FeedBert(){
   try{pets.Feed();}catch(Exception ex){MessageBox.Show(this,"Couldn't save the snack count.\n"+ex.Message,"Your pet");return;}
@@ -720,9 +773,9 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
     groupButtons.Add(group,b);windowList.Controls.Add(b);
    }
    List<IntPtr> grouped=handles.Where(h=>group.Apps.Any(a=>!String.IsNullOrEmpty(a.Target)&&String.Equals(paths[h],a.Target,StringComparison.OrdinalIgnoreCase))).ToList();
-   b.SetApp(group.IconApp);b.Text="";b.AccessibleName="Open group "+group.Name;b.Size=new Size(D(48),D(44));b.Vertical=edge==Edge.Left||edge==Edge.Right;
+   b.SetGroup(group);b.Text="";b.AccessibleName="Open group "+group.Name;b.Size=new Size(D(48),D(44));b.Vertical=edge==Edge.Left||edge==Edge.Right;
    b.Target=grouped.FirstOrDefault();b.Active=grouped.Contains(lastActive);b.Invalidate();
-   tips.SetToolTip(b,group.Name+" - "+group.Apps.Count+" apps"+(group.IconApp==null?"":"; logo: "+group.IconApp.Name));windowList.Controls.SetChildIndex(b,pinIndex++);
+   tips.SetToolTip(b,group.Name+" - "+group.Apps.Count+" apps"+(group.IconStyle!=0?"; custom icon":group.IconApp==null?"":"; logo: "+group.IconApp.Name));windowList.Controls.SetChildIndex(b,pinIndex++);
    handles.RemoveAll(h=>grouped.Contains(h));
   }
   foreach(PinnedApp pin in visiblePins){
@@ -777,15 +830,21 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
  }
  void EditGroup(AppGroup group){
   if(activeMenu!=null)activeMenu.Close();
-  using(GroupEditor editor=new GroupEditor(group))if(editor.ShowDialog(this)==DialogResult.OK){
+  if(closing)return;
+  if(groupEditor!=null&&!groupEditor.IsDisposed){groupEditor.Activate();return;}
+  GroupEditor editor=new GroupEditor(group){TopMost=true};groupEditor=editor;editingGroup=group;
+  editor.FormClosed+=delegate{
+   if(groupEditor==editor){groupEditor=null;editingGroup=null;}
+   if(closing||editor.DialogResult!=DialogResult.OK)return;
    if(group!=null){editor.Result.LastSelected=group.LastSelected;foreach(PinnedApp app in group.Apps)Preferences.Add(app.Path);int index=Preferences.Groups.IndexOf(group);Preferences.Groups[index]=editor.Result;}
    else Preferences.Groups.Add(editor.Result);
    Preferences.SaveGroups();Preferences.SavePins();BeginInvoke((Action)UpdateWindows);
-  }
+  };
+  editor.Show();editor.Activate();
  }
- void RememberGroupApp(AppGroup group,PinnedApp app){group.LastSelected=app.Path;Preferences.SaveGroups();GroupButton b;if(groupButtons.TryGetValue(group,out b))b.SetApp(group.IconApp);}
+ void RememberGroupApp(AppGroup group,PinnedApp app){group.LastSelected=app.Path;Preferences.SaveGroups();GroupButton b;if(groupButtons.TryGetValue(group,out b))b.SetGroup(group);}
  void GroupMenu(AppGroup group,Control owner){
-  ContextMenuStrip menu=new DarkMenu();menu.Items.Add(new ToolStripMenuItem(group.Name){Enabled=false});
+  ContextMenuStrip menu=new DarkMenu();menu.ImageScalingSize=new Size(24,24);menu.Items.Add(new ToolStripMenuItem(group.Name+"  ·  "+group.Apps.Count+" apps"){Enabled=false});menu.Items.Add(new ToolStripSeparator());
   List<IntPtr> windows=Native.Windows(Process.GetCurrentProcess().Id);Dictionary<IntPtr,string> paths=windows.ToDictionary(h=>h,h=>PinnedApp.WindowPath(h));
   foreach(PinnedApp app in group.Apps){
    PinnedApp target=app;Bitmap icon=app.GetIcon();menu.Disposed+=delegate{icon.Dispose();};
@@ -796,7 +855,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
   }
   if(group.Apps.Count==0)menu.Items.Add(new ToolStripMenuItem("No apps yet - choose Edit group"){Enabled=false});
   menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Edit group...",null,delegate{QueueGroupEditor(group);});
-  menu.Items.Add("Ungroup apps",null,delegate{foreach(PinnedApp app in group.Apps)Preferences.Add(app.Path);Preferences.Groups.Remove(group);Preferences.SaveGroups();Preferences.SavePins();BeginInvoke((Action)UpdateWindows);});
+  menu.Items.Add("Ungroup apps",null,delegate{if(editingGroup==group&&groupEditor!=null){groupEditor.Dispose();groupEditor=null;editingGroup=null;}foreach(PinnedApp app in group.Apps)Preferences.Add(app.Path);Preferences.Groups.Remove(group);Preferences.SaveGroups();Preferences.SavePins();BeginInvoke((Action)UpdateWindows);});
   ShowMenu(menu,owner);
  }
  void ShowMenu(ContextMenuStrip m,Control owner){
@@ -873,7 +932,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
  void ApplyTint(Color color){try{Preferences.SetTint(color);SyncBackground();}catch(Exception ex){MessageBox.Show(this,"Couldn't save the background colour.\n"+ex.Message,"Taskbar Compass");}}
  void Cleanup(){
   if(bertReaction!=null){bertReaction.Dispose();bertReaction=null;}
-  if(closing)return;closing=true;timer.Stop();background.Dispose();Native.UnregisterHotKey(Handle,1);
+  if(closing)return;closing=true;timer.Stop();if(petShop!=null){petShop.Dispose();petShop=null;}if(groupEditor!=null){groupEditor.Dispose();groupEditor=null;editingGroup=null;}background.Dispose();Native.UnregisterHotKey(Handle,1);
   if(moveHook!=IntPtr.Zero){Native.UnhookWinEvent(moveHook);moveHook=IntPtr.Zero;}
   if(ready)SavePetProgress();
   if(registered){Native.RemoveBar(Handle);registered=false;}session.Dispose();
@@ -950,10 +1009,10 @@ sealed class SetupWindow:Form {
   "Your replacement is active. Continue applies this edge to the running bar.":
   "Windows' taskbar stays visible until Continue. Restore brings it back.\nIncludes running app icons, a launcher, clock, and live battery meter.";}
  void Apply(){
-  if(bar!=null&&!bar.IsDisposed){bar.DockEdge(chosen);Hide();return;}
+  if(bar!=null&&!bar.IsDisposed){bar.DockEdge(chosen);RefreshStatus();return;}
   Directory.CreateDirectory(RecoveryRecord.Folder);File.WriteAllText(Path.Combine(RecoveryRecord.Folder,"edge.txt"),chosen.ToString());
   bar=new Bar();bar.FormClosed+=delegate{shuttingDown=true;Close();};
-  Hide();bar.Show();
+  bar.Show();RefreshStatus();
  }
  protected override void OnFormClosing(FormClosingEventArgs e){
   if(!shuttingDown&&bar!=null&&!bar.IsDisposed&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}

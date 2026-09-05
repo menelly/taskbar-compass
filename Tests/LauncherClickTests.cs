@@ -2,8 +2,15 @@ using System;using System.IO;using System.Reflection;using System.Drawing;using 
 namespace CompassBar {static class LauncherClickTests {
  static object Field(object target,string name){return target.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(target);}
  static void Check(bool ok,string name){if(!ok)throw new Exception(name);}
+ static void InvertBackground(Bar bar,Form background){
+  FieldInfo syncing=typeof(Bar).GetField("syncingBackground",BindingFlags.Instance|BindingFlags.NonPublic);
+  syncing.SetValue(bar,true);
+  try{Native.SetWindowPos(background.Handle,IntPtr.Zero,0,0,0,0,0x13);}finally{syncing.SetValue(bar,false);}
+ }
+ static bool Above(Form upper,Form lower){for(IntPtr h=Native.GetWindow(upper.Handle,2);h!=IntPtr.Zero;h=Native.GetWindow(h,2))if(h==lower.Handle)return true;return false;}
  [STAThread]static int Main(){try{
   Preferences.Folder=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"click-settings");Directory.CreateDirectory(Preferences.Folder);File.WriteAllText(Path.Combine(Preferences.Folder,"pins.txt"),"");
+  GroupIconTests.Run();
   using(Bar bar=new Bar()){
    bar.Location=new Point(-30000,-30000);bar.Show();
    Button launcher=(Button)Field(bar,"apps"),restore=(Button)Field(bar,"restore"),quick=(Button)Field(bar,"quickSettings");Control battery=(Control)Field(bar,"battery"),clock=(Control)Field(bar,"clock");Form background=(Form)Field(bar,"background");
@@ -30,6 +37,60 @@ namespace CompassBar {static class LauncherClickTests {
    down.Invoke(background,new object[]{new MouseEventArgs(MouseButtons.Left,1,start.X,start.Y,0)});
    up.Invoke(background,new object[]{new MouseEventArgs(MouseButtons.Left,1,-100000,-100000,0)});
    Check(!((ContextMenuStrip)Field(bar,"activeMenu")).Visible,"Dragging away does not open menu");
+   bar.Enabled=false;
+   Check(hit.Invoke(bar,new object[]{launcher.PointToScreen(new Point(4,4))})==null,"Disabled taskbar does not relay background clicks");
+   bar.Enabled=true;
+   // Exercise actual window ordering without registering an appbar or hiding Explorer.
+   FieldInfo registration=typeof(Bar).GetField("registered",BindingFlags.Instance|BindingFlags.NonPublic);
+   bar.Location=new Point(100,100);
+   registration.SetValue(bar,true);
+   try{
+    typeof(Bar).GetMethod("SyncBackground",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(bar,null);
+    Check(background.Opacity==1,"Fresh settings use a solid background");
+    InvertBackground(bar,background);
+    Check(Above(background,bar),"Fixture reproduces solid background above icons");
+    Application.DoEvents();
+    Check(Above(bar,background),"Deferred first-show repair restores icon order");
+    InvertBackground(bar,background);
+    Check(Above(background,bar),"Fixture reproduces a later background inversion");
+    typeof(Bar).GetMethod("EnsureBackgroundOrder",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(bar,null);
+    Check(Above(bar,background),"Periodic repair fixes a later inversion");
+   }finally{registration.SetValue(bar,false);background.Hide();}
+   MethodInfo openShop=typeof(Bar).GetMethod("OpenPetShop",BindingFlags.Instance|BindingFlags.NonPublic);
+   foreach(int closeMode in new[]{0,1,2}){
+    bool timedOut=false;
+    using(System.Windows.Forms.Timer timeout=new System.Windows.Forms.Timer{Interval=3000}){
+     timeout.Tick+=delegate{timedOut=true;foreach(Form form in Application.OpenForms.Cast<Form>().ToArray())if(form is PetShop)form.Close();};
+     timeout.Start();openShop.Invoke(bar,null);timeout.Stop();
+    }
+    Form shop=(Form)Field(bar,"petShop");
+    Check(!timedOut&&shop!=null&&shop.Visible&&!shop.Modal&&bar.Enabled,"Pet Shop opens without blocking taskbar");
+    openShop.Invoke(bar,null);Check(Field(bar,"petShop")==shop,"Pet Shop remains single instance");
+    launcher.PerformClick();Check(((ContextMenuStrip)Field(bar,"activeMenu")).Visible,"Launcher works while Pet Shop is open");((ContextMenuStrip)Field(bar,"activeMenu")).Close();
+    if(closeMode==0)shop.Controls.OfType<Button>().Single(b=>b.Text=="Close").PerformClick();
+    else if(closeMode==1)shop.Close();
+    else typeof(Form).GetMethod("ProcessDialogKey",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(shop,new object[]{Keys.Escape});
+    Application.DoEvents();Check(shop.IsDisposed&&Field(bar,"petShop")==null&&bar.Enabled,"Modeless shop closes and can reopen using method "+closeMode);
+   }
+   MethodInfo editGroup=typeof(Bar).GetMethod("EditGroup",BindingFlags.Instance|BindingFlags.NonPublic);
+   foreach(int closeMode in new[]{0,1,2,3}){
+    bool timedOut=false;
+    using(System.Windows.Forms.Timer timeout=new System.Windows.Forms.Timer{Interval=3000}){
+     timeout.Tick+=delegate{timedOut=true;foreach(Form form in Application.OpenForms.Cast<Form>().ToArray())if(form is GroupEditor)form.Close();};
+     timeout.Start();editGroup.Invoke(bar,new object[]{null});timeout.Stop();
+    }
+    GroupEditor editor=(GroupEditor)Field(bar,"groupEditor");
+    Check(!timedOut&&editor!=null&&editor.Visible&&!editor.Modal&&editor.Owner==null&&bar.Enabled,"Group editor is independent and does not block the taskbar");
+    editGroup.Invoke(bar,new object[]{null});Check(Field(bar,"groupEditor")==editor,"Group editor remains single instance");
+    launcher.PerformClick();Check(((ContextMenuStrip)Field(bar,"activeMenu")).Visible,"Launcher works while group editor is open");((ContextMenuStrip)Field(bar,"activeMenu")).Close();
+    int before=Preferences.Groups.Count;
+    if(closeMode==0){editor.Controls.OfType<TextBox>().Single().Text="Saved independent group";editor.Controls.OfType<Button>().Single(b=>b.Text=="Save group").PerformClick();}
+    else if(closeMode==1)editor.Controls.OfType<Button>().Single(b=>b.Text=="Cancel").PerformClick();
+    else if(closeMode==2)editor.Close();
+    else typeof(Form).GetMethod("ProcessDialogKey",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(editor,new object[]{Keys.Escape});
+    Application.DoEvents();Check(editor.IsDisposed&&Field(bar,"groupEditor")==null&&bar.Enabled,"Independent group editor closes using method "+closeMode);
+    Check(Preferences.Groups.Count==before+(closeMode==0?1:0),"Only Save writes the group");
+   }
    Rectangle monitor=new Rectangle(0,0,1920,1080);
    foreach(Edge edge in Enum.GetValues(typeof(Edge))){Rectangle strip=edge==Edge.Left?new Rectangle(0,0,74,1080):edge==Edge.Right?new Rectangle(1846,0,74,1080):edge==Edge.Top?new Rectangle(0,0,1920,54):new Rectangle(0,1026,1920,54);Size menuSize=new Size(300,700);Point point=Bar.MenuLocation(strip,new Rectangle(strip.Left,strip.Top,48,44),menuSize,monitor,edge);Rectangle menuRect=new Rectangle(point,menuSize);Check(monitor.Contains(menuRect)&&!menuRect.IntersectsWith(strip),"Menu stays on screen beside the taskbar on "+edge);}
    foreach(int closeMode in new[]{0,1,2}){
@@ -43,8 +104,9 @@ namespace CompassBar {static class LauncherClickTests {
    ToolTip petTips=(ToolTip)Field(bar,"tips");Check(petTips.GetToolTip(clock)==wallet.Current.Name+" - your taskbar pet","Feeding does not replace hover label with a thank-you");
    DateTime deadline=DateTime.UtcNow.AddSeconds(8);while(!reaction.IsDisposed&&DateTime.UtcNow<deadline){Application.DoEvents();System.Threading.Thread.Sleep(20);}Check(reaction.IsDisposed,"Bert reaction dismisses automatically");
    Check(petTips.GetToolTip(clock)==wallet.Current.Name+" - your taskbar pet","No stale thank-you after reaction expires");
+   openShop.Invoke(bar,null);Form ownedShop=(Form)Field(bar,"petShop");editGroup.Invoke(bar,new object[]{null});Form openEditor=(Form)Field(bar,"groupEditor");bar.Close();Check(ownedShop.IsDisposed&&openEditor.IsDisposed,"Closing taskbar disposes Pet Shop and group editor");
   }
   WindowsQuickSettings.Input[] keys=WindowsQuickSettings.Shortcut();Check(System.Runtime.InteropServices.Marshal.SizeOf(typeof(WindowsQuickSettings.Input))==40,"x64 input structure size");Check(keys.Length==4&&keys[0].Data.Keyboard.Key==0x5B&&keys[0].Data.Keyboard.Flags==0&&keys[1].Data.Keyboard.Key==0x41&&keys[1].Data.Keyboard.Flags==0&&keys[2].Data.Keyboard.Key==0x41&&keys[2].Data.Keyboard.Flags==2&&keys[3].Data.Keyboard.Key==0x5B&&keys[3].Data.Keyboard.Flags==2,"Quick settings sends Windows+A with both keys released");
-  File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"launcher-click-validation.txt"),"PASS: launcher, Restore, quick settings and battery hit areas on all four edges; no overlapping quick settings controls; Windows menu click routing and drag cancellation; Windows+A key sequence and x64 input layout. Test fixture disables real taskbar initialization and does not send keys.");return 0;
+  File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"launcher-click-validation.txt"),"PASS: launcher, Restore, quick settings and battery hit areas on all four edges; no overlapping controls; menu routing and drag cancellation; disabled-owner routing; solid background first-show and later z-order repair; modeless single-instance Pet Shop, launcher interaction, Close/Escape/window-close and owner cleanup; independent group editor Save/Cancel/Escape/window-close and cleanup; custom group icon persistence and legacy compatibility; pet feeding and reaction expiry; Windows+A key sequence and x64 input layout. Test fixture disables real taskbar initialization and does not send keys.");return 0;
  }catch(Exception ex){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"launcher-click-validation.txt"),"FAIL: "+ex);return 1;}}
 }}

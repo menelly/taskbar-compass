@@ -4,6 +4,14 @@ A customisable Windows taskbar with app groups, quick websites, and collectible 
 
 **Gui Update 1.2 · Windows-only beta · x64**
 
+## Dual-monitor recovery follow-up (2026-09-06)
+
+The replacement still runs on the primary monitor only. Secondary monitors retain their Windows taskbars. The watchdog now restores Windows' taskbars after 15 seconds without a response from the taskbar UI, as well as after process exit. Local diagnostic logs in `%LOCALAPPDATA%\TaskbarCompass\diagnostics-*.log` record startup, display geometry, exit reasons, and exceptions; they are not uploaded automatically.
+
+Live checks on the affected dual-monitor PC passed for all four edges, normal exit, abrupt exit, and restoration while the UI remained blocked. The original unexpected exit has not been reproduced or attributed to a specific cause. These source changes are not part of the published 1.2 download yet.
+
+Before running any test that opens windows, moves or replaces a taskbar, or otherwise changes a person's display, explain the visual effects and wait for their explicit approval. The isolated menu fixture opens visible dialogs; live validation moves the taskbar through all four edges. A progress announcement or general debugging request is not approval for these actions.
+
 ## Gui Update 1.2
 
 - Fixed the solid taskbar background covering app icons, including recovery after window-order changes.

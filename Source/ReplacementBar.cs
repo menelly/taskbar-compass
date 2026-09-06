@@ -19,6 +19,9 @@ static class AppIdentity {
  public static readonly Icon Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 }
 enum Edge { Left=0, Top=1, Right=2, Bottom=3 }
+static class DiagnosticLog {
+ public static void Write(string message){try{Directory.CreateDirectory(RecoveryRecord.Folder);string file=Path.Combine(RecoveryRecord.Folder,"diagnostics-"+Process.GetCurrentProcess().Id+".log");if(File.Exists(file)&&new FileInfo(file).Length>131072)File.WriteAllText(file,"");File.AppendAllText(file,DateTime.UtcNow.ToString("o")+" "+message+Environment.NewLine);}catch{}}
+}
 sealed class CompactTip:ToolTip {
  readonly Font font=new Font("Segoe UI",9);
  public static string Clean(string text){string clean=System.Text.RegularExpressions.Regex.Replace(text??"","\\s+"," ").Trim();return clean.Length>180?clean.Substring(0,177)+"...":clean;}
@@ -361,6 +364,7 @@ static class Native {
    string c=Class(h);if(c=="Shell_TrayWnd"||c=="Shell_SecondaryTrayWnd")a.Add(h);return true;
   },IntPtr.Zero);return a;
  }
+ public static List<IntPtr> ReplacedShellBars(){return ShellBars().Where(h=>MonitorFromWindow(h,2)==MonitorFromPoint(new Point(0,0),1)).ToList();}
  public static Rectangle Monitor(bool work){
   MONITORINFO m=new MONITORINFO();m.Size=Marshal.SizeOf(typeof(MONITORINFO));
   if(!GetMonitorInfo(MonitorFromPoint(new Point(0,0),1),ref m))throw new Exception("Primary monitor unavailable.");
@@ -423,6 +427,7 @@ sealed class Session:IDisposable {
   Record=new RecoveryRecord{Token=Guid.NewGuid().ToString("N"),State=Native.State(),Bar=bar.ToInt64()};
   foreach(IntPtr h in Native.ShellBars())Record.Visible[h.ToInt64()]=Native.IsWindowVisible(h);
   Record.Save();
+  DiagnosticLog.Write("Session begin; displays="+String.Join(";",Screen.AllScreens.Select(s=>(s.Primary?"primary ":"secondary ")+s.Bounds+" work="+s.WorkingArea)));
   ready=new EventWaitHandle(false,EventResetMode.ManualReset,RecoveryRecord.Event(Record.Token,"ready"));
   beat=new EventWaitHandle(false,EventResetMode.AutoReset,RecoveryRecord.Event(Record.Token,"beat"));
   stop=new EventWaitHandle(false,EventResetMode.ManualReset,RecoveryRecord.Event(Record.Token,"stop"));
@@ -431,10 +436,11 @@ sealed class Session:IDisposable {
   if(!ready.WaitOne(6000))throw new Exception("Recovery watchdog did not become ready. Nothing was hidden.");
   beat.Set();Native.SetState(Record.State|1);HideNative();
  }
- public bool Tick(){if(disposed||watcher==null||watcher.HasExited||stop.WaitOne(0))return false;beat.Set();HideNative();return true;}
- void HideNative(){foreach(IntPtr h in Native.ShellBars())if(Native.IsWindowVisible(h))Native.ShowWindow(h,0);}
+ public bool Tick(){if(disposed||watcher==null||watcher.HasExited||stop.WaitOne(0)){DiagnosticLog.Write("Session stopping: recovery watchdog exited or requested restoration.");return false;}beat.Set();HideNative();return true;}
+ void HideNative(){foreach(IntPtr h in Native.ReplacedShellBars())if(Native.IsWindowVisible(h))Native.ShowWindow(h,0);}
  public void Dispose(){
   if(disposed)return;disposed=true;
+  DiagnosticLog.Write("Session cleanup requested.");
   if(Record!=null){
    if(done!=null)done.Set();
    bool restored=watcher!=null&&watcher.WaitForExit(4000)&&watcher.ExitCode==0;
@@ -452,10 +458,11 @@ sealed class Session:IDisposable {
   using(EventWaitHandle stop=EventWaitHandle.OpenExisting(RecoveryRecord.Event(token,"stop")))
   using(EventWaitHandle done=EventWaitHandle.OpenExisting(RecoveryRecord.Event(token,"done"))){
    Process parent=null;try{parent=Process.GetProcessById(parentId);}catch{}
-   ready.Set();Stopwatch silence=Stopwatch.StartNew();
+   DiagnosticLog.Write("Watchdog started for process "+parentId);ready.Set();Stopwatch silence=Stopwatch.StartNew();
    try{while(parent!=null&&!parent.HasExited&&!done.WaitOne(200)){
     if(beat.WaitOne(0))silence.Restart();
-   }}finally{stop.Set();r.Restore();Thread.Sleep(350);r.Restore();r.Clear();if(parent!=null)parent.Dispose();}
+    if(silence.ElapsedMilliseconds>=15000){DiagnosticLog.Write("No UI heartbeat for 15 seconds; restoring Windows taskbars.");break;}
+   }}finally{DiagnosticLog.Write("Watchdog restoring Windows taskbars; parentExited="+(parent==null||parent.HasExited));stop.Set();r.Restore();Thread.Sleep(350);r.Restore();r.Clear();if(parent!=null)parent.Dispose();}
   }return 0;
  }
  public static void EmergencyRestore(){
@@ -463,6 +470,7 @@ sealed class Session:IDisposable {
   RecoveryRecord r=RecoveryRecord.Load();
   try{using(EventWaitHandle e=EventWaitHandle.OpenExisting(RecoveryRecord.Event(r.Token,"stop")))e.Set();}catch(WaitHandleCannotBeOpenedException){}
   r.Restore();r.Clear();
+  DiagnosticLog.Write("Emergency restoration completed.");
  }
 }
 class WindowButton:Button {
@@ -675,7 +683,7 @@ sealed class Bar:Form {
   tips.SetToolTip(restore,"Restore Windows taskbar and its previous auto-hide setting, then exit.");
   tips.SetToolTip(apps,"Search, launch apps, and adjust taskbar settings.");
   timer.Interval=150;timer.Tick+=delegate{if(!session.Tick()){Close();return;}EnsureBackgroundOrder();EarnPetCoins();if(++refreshCount%5==0){UpdateWindows();battery.UpdateReading();}UpdateClock();};
-  Shown+=delegate{Initialize();};FormClosing+=delegate{Cleanup();};
+  Shown+=delegate{Initialize();};FormClosing+=delegate(object sender,FormClosingEventArgs e){DiagnosticLog.Write("Bar closing: "+e.CloseReason);Cleanup();};
  }
  void UpdateClock(){
   coinCounter.Text=CoinText(pets.Coins)+" coins";coinCounter.AccessibleName=pets.Coins.ToString("0.00")+" coins - open Pet Shop";
@@ -942,7 +950,7 @@ edge=next;Rectangle bounds=Native.Monitor(false);bool vertical=edge==Edge.Left||
   SaveForSessionMessage(m.Msg,m.WParam);
   if(m.Msg==0x21){m.Result=new IntPtr(3);return;}
   if(m.Msg==0x312&&m.WParam.ToInt32()==1){Close();return;}
-  if(m.Msg==shellRestart&&ready)BeginInvoke((Action)delegate{Close();});
+  if(m.Msg==shellRestart&&ready){DiagnosticLog.Write("Explorer taskbar was recreated; restoring and closing Compass.");BeginInvoke((Action)delegate{Close();});}
   if(m.Msg==callback&&registered&&!closing){
    int n=m.WParam.ToInt32();if(n==1&&!placing)BeginInvoke((Action)delegate{DockEdge(edge);});
    if(n==2){TopMost=m.LParam==IntPtr.Zero;if(!TopMost)Native.SetWindowPos(Handle,new IntPtr(1),0,0,0,0,0x13);}
@@ -1029,6 +1037,9 @@ sealed class SetupWindow:Form {
 static class Program {
  static string LogPath{get{return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"replacement-validation.txt");}}
  [STAThread]static int Main(string[]args){
+  Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+  AppDomain.CurrentDomain.UnhandledException+=delegate(object sender,UnhandledExceptionEventArgs e){DiagnosticLog.Write("Unhandled exception: "+e.ExceptionObject);};
+  DiagnosticLog.Write("Starting "+Application.ExecutablePath+" version="+Application.ProductVersion+" mode="+(args.Length==0?"setup":args[0]));
   Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
   try{
    if(args.Length>0&&args[0]=="--inspect"){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"replacement-status.txt"),"Foreground="+Native.GetForegroundWindow()+"; Battery="+BatteryMeter.ReadText()+"; State="+Native.State()+"; workspace="+Native.Monitor(true)+"; bars="+String.Join(",",Native.ShellBars().Select(h=>Native.Class(h)+" visible="+Native.IsWindowVisible(h))));return 0;} if(args.Length>0&&args[0]=="--watchdog")return Session.Watch(Int32.Parse(args[1]),args[2]);
@@ -1042,25 +1053,28 @@ static class Program {
 }
 if(args.Length==0){Application.Run(new SetupWindow());return 0;}
     using(Bar b=new Bar()){
-     if(args.Length>0&&args[0].StartsWith("--validation-"))ConfigureValidation(b,args[0].EndsWith("crash"));
+     if(args.Length>0&&args[0].StartsWith("--validation-"))ConfigureValidation(b,args[0].EndsWith("crash"),args[0].EndsWith("hang"));
      Application.Run(b);return b.Failure==null?0:1;
     }
    }
   }catch(Exception ex){
+   DiagnosticLog.Write("Fatal UI/startup exception: "+ex);
    try{if(File.Exists(RecoveryRecord.FileName)){RecoveryRecord r=RecoveryRecord.Load();r.Restore();r.Clear();}}catch{}
    if(args.Length>0&&args[0]=="--validate-live")File.AppendAllText(LogPath,"FAIL: "+ex+"\r\n");
    else MessageBox.Show("Taskbar Compass stopped.\n"+ex.Message,"Taskbar Compass");return 1;
-  }
+  }finally{DiagnosticLog.Write("Process main returning.");}
  }
- static void ConfigureValidation(Bar b,bool crash){
+ static void ConfigureValidation(Bar b,bool crash,bool hang){
   int step=0;Form first=null,second=null;
   System.Windows.Forms.Timer t=new System.Windows.Forms.Timer{Interval=1200};
   t.Tick+=delegate{
    try{
     if(!b.Ready)return;
+    if(hang&&step==0){DiagnosticLog.Write("Validation: simulating blocked UI for 18 seconds.");Thread.Sleep(18000);t.Stop();t.Dispose();b.Close();return;}
     if(step==0){
-     if(Native.ShellBars().Any(Native.IsWindowVisible))throw new Exception("A native taskbar is still visible: "+String.Join(",",Native.ShellBars().Select(h=>Native.Class(h)+"="+Native.IsWindowVisible(h)))+"; auto-hide state="+Native.State());
-     File.AppendAllText(LogPath,"PASS: native taskbars hidden during replacement.\r\n");
+     if(Native.ReplacedShellBars().Any(Native.IsWindowVisible))throw new Exception("The primary native taskbar is still visible.");
+     if(Native.ShellBars().Except(Native.ReplacedShellBars()).Any(h=>!Native.IsWindowVisible(h)))throw new Exception("A secondary native taskbar was hidden.");
+     File.AppendAllText(LogPath,"PASS: primary native taskbar hidden; secondary native taskbars visible.\r\n");
     }
     if(step<8 && step%2==0)b.DockEdge((Edge)(step/2)); if(step<8 && step%2==1){
      Edge e=(Edge)(step/2);Rectangle monitor=Native.Monitor(false),work=Native.Monitor(true),bar=b.Bounds;
